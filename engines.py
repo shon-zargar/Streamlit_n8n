@@ -515,3 +515,19 @@ def get_dynamic_stock_data(tickers_dict):
         except:
             continue
     return pd.DataFrame(data)
+
+
+class FinConfig:
+    pass
+
+
+class DataIngestionLayer:
+    pass
+
+
+def generate_branded_calc_pdf():
+    return None
+
+
+def get_goals():
+    return None
