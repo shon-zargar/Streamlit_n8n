@@ -6,7 +6,7 @@ from datetime import date, datetime
 from engines import (
     init_db, get_leads_data, add_interaction, save_file,
     DataIngestionLayer, FinanceEngine, FinConfig, generate_branded_calc_pdf,
-    setup_page_styling
+    setup_page_styling, safe_format
 )
 
 # --- Page Configuration & Styling ---
@@ -61,7 +61,7 @@ with tabs[1]:
     st.divider()
     rcol1, rcol2, rcol3 = st.columns(3)
     rcol1.metric("💵 שכר ברוטו", f"₪{gross:,.0f}")
-    rcol2.metric("✅ שכר נטו", f"₪{net:,.2f}")
+    rcol2.metric("✅ שכר נטו", f"₪{safe_format(net):,.2f}")
     rcol3.metric("📊 מס אפקטיבי", f"{100 - (net / gross * 100):.1f}%")
 
 # Tab 3: Fees

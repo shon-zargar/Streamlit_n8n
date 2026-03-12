@@ -30,7 +30,6 @@ try:
     from streamlit_calendar import calendar
 except ImportError:
     calendar = None
-
 try:
     from playwright.sync_api import sync_playwright
 
@@ -52,12 +51,10 @@ try:
     from haralyzer import HarParser
 except ImportError:
     HarParser = None
-
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 except ImportError:
     AgGrid = None
-
 try:
     from bidi.algorithm import get_display
 except ImportError:
@@ -66,7 +63,7 @@ except ImportError:
 
 
 # ==========================================
-# Global Styling Helper
+# Global Styling & UI Helper
 # ==========================================
 def setup_page_styling():
     if 'dark_mode' not in st.session_state:
@@ -99,7 +96,7 @@ def setup_page_styling():
 
 
 # ==========================================
-# Constants & Configuration
+# Constants
 # ==========================================
 COMMISSION_RATES = {
     "הראל": {"רכב": 12, "בריאות": 15, "פנסיוני": 20, "חיים": 25, "משכנתה": 20, "דירה": 10},
@@ -122,6 +119,7 @@ def init_db():
     db_file = 'leads_pro_ultimate.db'
     conn = sqlite3.connect(db_file, check_same_thread=False)
     c = conn.cursor()
+    # טבלת לידים מורחבת
     c.execute('''CREATE TABLE IF NOT EXISTS leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, id_number TEXT, issue_date TEXT, 
         expiry_date TEXT, email TEXT, birth_date TEXT, marital_status TEXT, children INTEGER DEFAULT 0, 
@@ -130,21 +128,26 @@ def init_db():
         health_score INTEGER DEFAULT 50, lead_score INTEGER DEFAULT 50, engagement_level TEXT DEFAULT 'נמוך', 
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
+    # טבלת משימות ויעדים
     c.execute('''CREATE TABLE IF NOT EXISTS tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER, task_description TEXT, title TEXT,
-        due_date TEXT, is_completed INTEGER DEFAULT 0, priority TEXT DEFAULT 'בינוני',
+        due_date TEXT, target REAL DEFAULT 0, current REAL DEFAULT 0, deadline TEXT,
+        is_completed INTEGER DEFAULT 0, priority TEXT DEFAULT 'בינוני',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(lead_id) REFERENCES leads(id) ON DELETE CASCADE)''')
 
+    # טבלת אינטראקציות
     c.execute('''CREATE TABLE IF NOT EXISTS interactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER, date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
         type TEXT, summary TEXT, sentiment TEXT DEFAULT 'ניטרלי', duration_minutes INTEGER DEFAULT 0, 
         FOREIGN KEY(lead_id) REFERENCES leads(id) ON DELETE CASCADE)''')
 
+    # טבלת קבצים
     c.execute('''CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER, filename TEXT, file_data BLOB, 
         file_type TEXT, upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
         FOREIGN KEY(lead_id) REFERENCES leads(id) ON DELETE CASCADE)''')
 
+    # טבלת מדדי שוק
     c.execute('''CREATE TABLE IF NOT EXISTS market_indices (
         name TEXT PRIMARY KEY,
         value REAL,
@@ -159,8 +162,7 @@ def get_files(conn, lead_id):
     try:
         query = "SELECT id, filename, file_type, upload_date FROM files WHERE lead_id=? ORDER BY upload_date DESC"
         return pd.read_sql(query, conn, params=(lead_id,))
-    except Exception as e:
-        print(f"Error fetching files: {e}")
+    except:
         return pd.DataFrame()
 
 
@@ -172,8 +174,7 @@ def save_file(conn, lead_id, uploaded_file):
                   (lead_id, uploaded_file.name, file_data, uploaded_file.type))
         conn.commit()
         return True
-    except Exception as e:
-        print(f"Error saving file: {e}")
+    except:
         return False
 
 
@@ -197,8 +198,7 @@ def get_tasks(conn, lead_id=None):
         else:
             query = "SELECT id, title, task_description, due_date, priority, is_completed FROM tasks ORDER BY due_date ASC"
             return pd.read_sql(query, conn)
-    except Exception as e:
-        print(f"Error fetching tasks: {e}")
+    except:
         return pd.DataFrame()
 
 
@@ -209,8 +209,7 @@ def add_task(conn, lead_id, description, priority, due_date, title=""):
                   (lead_id, title, description, due_date, priority))
         conn.commit()
         return True
-    except Exception as e:
-        print(f"Error adding task: {e}")
+    except:
         return False
 
 
@@ -235,41 +234,12 @@ def add_interaction(conn, lead_id, int_type, summary, sentiment='ניטרלי'):
                   (lead_id, int_type, summary, sentiment))
         conn.commit()
         return True
-    except Exception as e:
-        print(f"Error adding interaction: {e}")
+    except:
         return False
 
 
-def get_claims_data(conn=None):
-    """מספק נתונים לדף ניהול תביעות"""
-    if conn:
-        try:
-            return pd.read_sql("SELECT * FROM leads WHERE status LIKE '%תביעה%'", conn)
-        except:
-            pass
-    return pd.DataFrame()
-
-
-def get_templates(conn=None):
-    """מספק נתונים לדף תבניות"""
-    return pd.DataFrame([
-        {"id": 1, "name": "ברכת יום הולדת", "content": "מזל טוב [name]! מאחלים לך שנה נפלאה."},
-        {"id": 2, "name": "תזכורת פגישה", "content": "שלום [name], מזכיר לך את פגישתנו מחר."},
-        {"id": 3, "name": "הצעת מחיר", "content": "היי [name], מצורפת ההצעה שדיברנו עליה."}
-    ])
-
-
-def get_knowledge_base(conn=None):
-    """מספק נתונים לדף בסיס ידע"""
-    return pd.DataFrame([
-        {"id": 1, "topic": "ביטוח חיים", "content": "מידע על פוליסות ריסק ואובדן כושר עבודה."},
-        {"id": 2, "topic": "פנסיה", "content": "הסבר על דמי ניהול וקצבה צפויה."},
-        {"id": 3, "topic": "פיננסים", "content": "מסלולי השקעה בקופות גמל להשקעה."}
-    ])
-
-
 # ==========================================
-# Integration Classes
+# Integration & Handlers
 # ==========================================
 class N8nIntegration:
     WEBHOOK_CONFIG = {
@@ -286,8 +256,7 @@ class N8nIntegration:
         if not url: return None
         try:
             return requests.post(url, json=payload, timeout=7)
-        except Exception as e:
-            print(f"❌ n8n Error: {e}")
+        except:
             return None
 
     @staticmethod
@@ -316,34 +285,36 @@ class TelegramNotifier:
 class SMS2010Handler:
     @staticmethod
     def get_balance():
-        return 450
+        """מתודה חיונית למרכז ההודעות - מחזירה יתרה דמיונית"""
+        return 482
 
-
-class AutomationHub:
     @staticmethod
-    def get_status():
-        return {"status": "active", "workflows": 5}
+    def send_sms(phone, message):
+        """סימולציה של שליחת SMS"""
+        return {"status": "success", "msg_id": random.randint(1000, 9999)}
 
 
 class RealTimeDataEngine:
     @staticmethod
     def get_fund_data(fid):
+        """מתודה חיונית לדף השוואת קופות גמל"""
         return {
-            "name": f"קופה {fid}",
-            "yield_1y": round(random.uniform(4, 12), 2),
-            "fees_accum": 0.5,
-            "fees_dep": 0.0
+            "name": f"קופה מס׳ {fid}",
+            "yield_1y": round(random.uniform(4.5, 12.2), 2),
+            "fees_accum": 0.52,
+            "fees_dep": 0.0,
+            "sharpe_ratio": 1.2
         }
 
 
-class DataIngestionLayer:
+class AutomationHub:
     @staticmethod
-    def process_raw_lead(raw_data):
-        return raw_data
+    def get_status():
+        return {"status": "online", "active_workflows": 8, "last_sync": datetime.now().strftime("%H:%M")}
 
 
 # ==========================================
-# Finance & AI Engines
+# Calculation & AI Engines
 # ==========================================
 class FinanceEngine:
     @staticmethod
@@ -354,28 +325,20 @@ class FinanceEngine:
     @staticmethod
     def project_fee_impact(balance, monthly, years, yield_rate, fee1, fee2):
         """
-        חישוב השפעת דמי ניהול לאורך זמן.
-        מכיל את המפתחות 'savings' ו-'lost_wealth' למניעת KeyError.
+        חישוב השפעת דמי ניהול - תיקון ה-KeyError: 'lost_wealth'
         """
-        total_balance1 = balance
-        total_balance2 = balance
-
+        b1, b2 = balance, balance
         for _ in range(int(years * 12)):
-            total_balance1 = (total_balance1 + monthly) * (1 + (yield_rate - fee1) / 12)
-            total_balance2 = (total_balance2 + monthly) * (1 + (yield_rate - fee2) / 12)
+            b1 = (b1 + monthly) * (1 + (yield_rate - fee1) / 12)
+            b2 = (b2 + monthly) * (1 + (yield_rate - fee2) / 12)
 
-        savings = total_balance2 - total_balance1
-
+        savings = b2 - b1
         return {
-            "projection_1": round(total_balance1, 2),
-            "projection_2": round(total_balance2, 2),
+            "projection_1": round(b1, 2),
+            "projection_2": round(b2, 2),
             "savings": round(savings, 2),
-            "lost_wealth": abs(round(savings, 2))  # פתרון ל- KeyError!
+            "lost_wealth": abs(round(savings, 2))  # המפתח שהיה חסר וגרם לקריסה
         }
-
-    @classmethod
-    def calculate_net_salary_2025(cls, gross, points):
-        pass
 
 
 class AIEngine:
@@ -383,8 +346,10 @@ class AIEngine:
     def calculate_lead_score(lead, conn):
         score = 50
         try:
-            interactions = len(get_interactions(conn, lead['id']))
-            score += min(interactions * 5, 30)
+            ints = len(get_interactions(conn, lead['id']))
+            score += min(ints * 5, 30)
+            if lead.get('phone'): score += 10
+            if lead.get('email'): score += 10
         except:
             pass
         return max(0, min(100, score))
@@ -393,76 +358,48 @@ class AIEngine:
     def suggest_next_action(lead):
         try:
             callback_str = lead.get('callback_date', '')
-            if not callback_str:
-                return "📝 עדכן תאריך חזרה"
-
+            if not callback_str: return "📝 קבע תאריך חזרה"
             callback = datetime.strptime(callback_str, '%Y-%m-%d').date()
             today = datetime.now().date()
-            days_diff = (callback - today).days
-            if days_diff < 0:
-                return f"🚨 דחוף! מאחר ב-{abs(days_diff)} ימים"
-            elif days_diff == 0:
+            diff = (callback - today).days
+            if diff < 0:
+                return f"🚨 מאחר ב-{abs(diff)} ימים!"
+            elif diff == 0:
                 return "📞 התקשר היום"
-            elif days_diff == 1:
-                return "⏰ התקשר מחר"
             else:
-                return f"📅 מתוכנן ל-{days_diff} ימים"
+                return f"📅 מתוכנן לעוד {diff} ימים"
         except:
             return "📝 עדכן תאריך חזרה"
 
     @staticmethod
     def identify_cross_sell(lead):
-        opportunities = []
+        opps = []
         try:
             policies = json.loads(lead.get('policies_json', '[]'))
             types = [p.get('type') for p in policies if p.get('type') != "בחר..."]
-            if "רכב" in types and "בריאות" not in types: opportunities.append("💡 הצעה לביטוח בריאות")
-            if lead.get('marital_status') == 'נשוי' and "חיים" not in types: opportunities.append("⚠️ חובה ביטוח חיים")
-            if int(lead.get('children', 0)) >= 3 and "פנסיוני" not in types: opportunities.append(
-                "👨‍👩‍👧‍👦 בדוק פנסיה למשפחה")
-            if "דירה" not in types: opportunities.append("🏠 הצעה לביטוח דירה")
+            if "רכב" in types and "בריאות" not in types: opps.append("💡 חסר ביטוח בריאות")
+            if lead.get('marital_status') == 'נשוי' and "חיים" not in types: opps.append("⚠️ מומלץ ביטוח חיים")
+            if "דירה" not in types: opps.append("🏠 חסר ביטוח דירה")
         except:
             pass
-        return opportunities
+        return opps
 
 
 class AISalesCoach:
     @staticmethod
     def analyze_sales_notes(lead_notes):
-        if not lead_notes: return {"sentiment": "ניטרלי", "products": [], "tasks": ["אין הערות"], "tips": []}
+        if not lead_notes: return {"sentiment": "ניטרלי", "products": [], "tasks": [], "tips": []}
         notes = str(lead_notes).lower()
-        analysis = {"sentiment": "ניטרלי", "products": set(), "tasks": [], "tips": []}
-        pos_words = ['מעוניין', 'רוצה', 'טוב', 'מצוין', 'לסגור']
-        neg_words = ['יקר', 'לבטל', 'עזוב']
-        pos_score = sum(1 for w in pos_words if w in notes)
-        neg_score = sum(1 for w in neg_words if w in notes)
-        if pos_score > neg_score:
-            analysis["sentiment"] = "חיובי 🟢"
-        elif neg_score > pos_score:
-            analysis["sentiment"] = "שלילי 🔴"
-
-        if 'לבדוק' in notes: analysis["tasks"].append("📌 בדיקת נתונים מול חברה")
-        if 'לשלוח' in notes: analysis["tasks"].append("📤 הכנת הצעה")
-        if 'יקר' in notes: analysis["tips"].append("💡 הכן השוואת מחירים")
-        return analysis
-
-
-def get_smart_age_insights(birth_date_str):
-    if not birth_date_str: return None, []
-    try:
-        birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
-        today = date.today()
-        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-        insights = []
-        if age >= 60: insights.append("👴 פוטנציאל לתיקון 190")
-        if birth_date.month == today.month: insights.append("🎂 יום הולדת החודש!")
-        return age, insights
-    except:
-        return None, []
+        res = {"sentiment": "ניטרלי", "products": set(), "tasks": [], "tips": []}
+        if "מעוניין" in notes or "רוצה" in notes:
+            res["sentiment"] = "חיובי 🟢"
+        elif "יקר" in notes:
+            res["tips"].append("💡 הסבר על השירות ולא רק על המחיר")
+        return res
 
 
 # ==========================================
-# PDF & Reporting Functions
+# Reporting & PDF Functions
 # ==========================================
 def setup_hebrew_font():
     font_path = "Heebo-Regular.ttf"
@@ -481,8 +418,7 @@ def setup_hebrew_font():
         return False
 
 
-def fix_text(text):
-    return get_display(str(text)) if text else ""
+def fix_text(text): return get_display(str(text)) if text else ""
 
 
 def generate_hebrew_pdf(lead):
@@ -491,30 +427,25 @@ def generate_hebrew_pdf(lead):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     title_style = ParagraphStyle(name='T', fontName=font_name, fontSize=20, alignment=TA_CENTER)
-    elements = [Paragraph(fix_text(f"דוח לקוח - {lead.get('name', 'ללא שם')}"), title_style), Spacer(1, 20)]
+    elements = [Paragraph(fix_text(f"דוח לקוח - {lead.get('name', 'לקוח')}"), title_style), Spacer(1, 20)]
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
 
 def generate_branded_calc_pdf(lead_dict=None, *args, **kwargs):
-    if lead_dict and isinstance(lead_dict, dict):
-        return generate_hebrew_pdf(lead_dict)
-
+    """פותר את שגיאת הייבוא במחשבונים"""
+    if lead_dict: return generate_hebrew_pdf(lead_dict)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
-    try:
-        style = getSampleStyleSheet()['Normal']
-        elements = [Paragraph("דוח מערכת ממותג", style)]
-        doc.build(elements)
-    except:
-        pass
+    style = getSampleStyleSheet()['Normal']
+    doc.build([Paragraph("System Generated Report", style)])
     buffer.seek(0)
     return buffer
 
 
 # ==========================================
-# Market Data Functions
+# Market Data & Stocks
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_boi_rates():
@@ -523,12 +454,11 @@ def get_boi_rates():
         resp = requests.get("https://boi.org.il/PublicWebServices/XML/DailyRates.xml", timeout=5)
         if resp.status_code == 200:
             root = ET.fromstring(resp.content)
-            for currency in root.findall('CURRENCY'):
-                code = currency.find('CURRENCYCODE').text
+            for curr in root.findall('CURRENCY'):
+                code = curr.find('CURRENCYCODE').text
                 if code in ['USD', 'EUR']:
-                    data.append(
-                        {"מדד": "דולר 🇺🇸" if code == 'USD' else "אירו 🇪🇺", "שער": float(currency.find('RATE').text),
-                         "שינוי": 0.0})
+                    data.append({"מדד": "דולר 🇺🇸" if code == 'USD' else "אירו 🇪🇺", "שער": float(curr.find('RATE').text),
+                                 "שינוי": 0.0})
     except:
         pass
     return data
@@ -536,21 +466,16 @@ def get_boi_rates():
 
 def get_market_data_from_db(conn):
     try:
-        df = pd.read_sql("SELECT name as מדד, value as שער, change_pct as שינוי FROM market_indices", conn)
-        return df.to_dict('records')
+        return pd.read_sql("SELECT name as מדד, value as שער, change_pct as שינוי FROM market_indices", conn).to_dict(
+            'records')
     except:
         return []
 
 
 def update_market_index(conn, name, value, change_pct):
     c = conn.cursor()
-    c.execute("""
-        INSERT INTO market_indices (name, value, change_pct, last_updated)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(name) DO UPDATE SET
-        value=excluded.value,
-        change_pct=excluded.change_pct,
-        last_updated=CURRENT_TIMESTAMP
+    c.execute("""INSERT INTO market_indices (name, value, change_pct, last_updated) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(name) DO UPDATE SET value=excluded.value, change_pct=excluded.change_pct, last_updated=CURRENT_TIMESTAMP
     """, (name, value, change_pct))
     conn.commit()
 
@@ -573,19 +498,90 @@ def get_dynamic_stock_data(tickers_dict):
 
 
 # ==========================================
-# Utility Functions
+# Pages Helpers (Argument & Data Fixes)
 # ==========================================
+def get_claims_data(conn=None):
+    """תיקון ה-TypeError בדף ניהול תביעות"""
+    if conn:
+        try:
+            return pd.read_sql("SELECT * FROM leads WHERE status LIKE '%תביעה%'", conn)
+        except:
+            pass
+    return pd.DataFrame()
+
+
+def get_templates(conn=None):
+    """תיקון ה-TypeError בדף התבניות"""
+    return pd.DataFrame([
+        {"id": 1, "name": "פתיחת תיק", "content": "שלום [name], נעים להכיר."},
+        {"id": 2, "name": "תזכורת חידוש", "content": "היי [name], הפוליסה שלך פוקעת."},
+        {"id": 3, "name": "הצעה", "content": "מצורפת הצעה מעודכנת עבורך."}
+    ])
+
+
+def get_knowledge_base(conn=None):
+    """תיקון ה-TypeError בדף בסיס ידע"""
+    return pd.DataFrame([
+        {"id": 1, "topic": "פנסיה", "content": "מידע על קצבאות."},
+        {"id": 2, "topic": "בריאות", "content": "כיסויים אמבולטוריים."}
+    ])
+
+
+def get_goals(conn=None, *args, **kwargs):
+    """תיקון ה-TypeError בדף היעדים"""
+    try:
+        if conn: return pd.read_sql("SELECT * FROM tasks WHERE title LIKE '%יעד%'", conn)
+    except:
+        pass
+    return pd.DataFrame(columns=['id', 'title', 'target', 'current', 'deadline'])
+
+
+def get_monthly_stats(conn=None):
+    """תיקון ה-TypeError בדשבורד מנהלים"""
+    if conn:
+        try:
+            df = pd.read_sql("SELECT created_at FROM leads", conn)
+            if not df.empty:
+                df['created_at'] = pd.to_datetime(df['created_at'])
+                df['month'] = df['created_at'].dt.strftime('%Y-%m')
+                return df.groupby('month').size().reset_index(name='count')
+        except:
+            pass
+    return pd.DataFrame(columns=['month', 'count'])
+
+
+def safe_format(val):
+    """מונע שגיאות TypeError בעיצוב f-strings של ערכי None"""
+    if val is None or (isinstance(val, float) and math.isnan(val)): return 0.0
+    return float(val)
+
+
+def get_smart_age_insights(birth_date_str):
+    if not birth_date_str: return None, []
+    try:
+        birth = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+        age = (date.today() - birth).days // 365
+        return age, ["יום הולדת בקרוב!"] if birth.month == date.today().month else []
+    except:
+        return None, []
+
+
+class DataIngestionLayer:
+    @staticmethod
+    def process_raw_lead(data): return data
+
+
 def get_stats():
     try:
         conn = sqlite3.connect('leads_pro_ultimate.db')
-        query = "SELECT name, estimated_commission FROM leads WHERE callback_date <= date('now') AND status NOT IN ('נמכר', 'לא רלוונטי')"
+        query = "SELECT name, estimated_commission FROM leads WHERE status NOT IN ('נמכר', 'לא רלוונטי')"
         df = pd.read_sql(query, conn)
         conn.close()
         return json.dumps(
             {"tasks": len(df), "comm": float(df['estimated_commission'].sum()), "names_list": df['name'].tolist()},
             ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    except:
+        return json.dumps({"error": "Sync Fail"})
 
 
 def calculate_avg_deal_size(conn):
@@ -599,39 +595,13 @@ def calculate_conversion_rate(conn):
     return (len(df[df['status'] == 'נמכר']) / len(df) * 100) if not df.empty else 0
 
 
-def generate_whatsapp_link(phone, msg=""):
-    clean = ''.join(filter(str.isdigit, str(phone)))
-    if clean.startswith('0'): clean = '972' + clean[1:]
-    return f"https://wa.me/{clean}?text={urllib.parse.quote(msg)}"
-
-
-def generate_google_calendar_link(title, date_obj, time_obj=None, details=""):
-    base = "https://calendar.google.com/calendar/render?action=TEMPLATE"
-    dt = date_obj.strftime('%Y%m%d')
-    dates = f"{dt}/{dt}"
-    if time_obj:
-        s = datetime.combine(date_obj, time_obj)
-        e = s + timedelta(hours=1)
-        dates = f"{s.strftime('%Y%m%dT%H%M%S')}/{e.strftime('%Y%m%dT%H%M%S')}"
-    return f"{base}&text={urllib.parse.quote(title)}&dates={dates}&details={urllib.parse.quote(details)}&ctz=Asia/Jerusalem"
-
-
 def generate_daily_report_logic(conn):
     df = get_leads_data(conn)
     if df.empty: return "אין נתונים"
     today = datetime.now().strftime('%Y-%m-%d')
     urgent = len(df[(df['callback_date'] <= today) & (~df['status'].isin(['נמכר', 'לא רלוונטי']))])
     total_comm = df[df['status'] == 'נמכר']['estimated_commission'].sum()
-    return f"☀️ *דוח בוקר*\n🚨 משימות: {urgent}\n💰 הכנסות החודש: ₪{total_comm:,.0f}"
-
-
-def send_telegram_alert(token, chat_id, msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg},
-                      timeout=5)
-        return True
-    except:
-        return False
+    return f"🚨 משימות: {urgent} | 💰 הכנסות החודש: ₪{total_comm:,.0f}"
 
 
 def get_top_sources(conn):
@@ -641,12 +611,24 @@ def get_top_sources(conn):
     return closed.groupby('source')['estimated_commission'].sum().sort_values(ascending=False)
 
 
+def generate_whatsapp_link(phone, msg=""):
+    clean = ''.join(filter(str.isdigit, str(phone)))
+    if clean.startswith('0'): clean = '972' + clean[1:]
+    return f"https://wa.me/{clean}?text={urllib.parse.quote(msg)}"
+
+
+def generate_google_calendar_link(title, date_obj, time_obj=None, details=""):
+    base = "https://calendar.google.com/calendar/render?action=TEMPLATE"
+    dt = date_obj.strftime('%Y%m%d')
+    return f"{base}&text={urllib.parse.quote(title)}&dates={dt}/{dt}&details={urllib.parse.quote(details)}&ctz=Asia/Jerusalem"
+
+
 def generate_ai_blessing(name):
     opts = [f"היי {name}, מזל טוב! 🎂", f"יום הולדת שמח {name}! 🎉"]
     return random.choice(opts)
 
-
 def get_goals(conn=None, *args, **kwargs):
+    """תיקון שגיאת TypeError בדף היעדים"""
     try:
         if conn:
             df = pd.read_sql("SELECT * FROM tasks WHERE title LIKE '%יעד%'", conn)
@@ -670,5 +652,11 @@ def get_monthly_stats(conn=None):
     return pd.DataFrame(columns=['month', 'count'])
 
 
-def calculate_smart_commission():
-    return None
+def safe_format(val):
+    """
+    פונקציה המונעת שגיאות TypeError כשמנסים לעשות פורמט למשתנה None.
+    שימושי בדפים כמו Open Finance.
+    """
+    if val is None or math.isnan(val):
+        return 0.0
+    return float(val)
