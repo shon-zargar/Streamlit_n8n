@@ -45,6 +45,7 @@ if custom_ticker:
     tickers_to_fetch[f"חיפוש: {custom_ticker.upper()}"] = custom_ticker.upper()
 
 with st.spinner("שואב נתוני אמת..."):
+    # בקשות REST ישירות דרך הפונקציות ב-engines
     boi_data = get_boi_rates()
     market_df = get_dynamic_stock_data(tickers_to_fetch)
 

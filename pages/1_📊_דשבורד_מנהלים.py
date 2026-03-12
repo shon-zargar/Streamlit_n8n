@@ -1,72 +1,97 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
 import plotly.express as px
-import plotly.graph_objects as go
+import os
 
-from engines import (
-    init_db, get_leads_data, calculate_avg_deal_size, calculate_conversion_rate
-)
+# הגנה למקרה שהמשתמש קפץ ישירות לדף הזה בלי לעבור בדף הבית
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Page Configuration ---
-st.set_page_config(layout="wide", page_title="דשבורד מנהלים")
+# טעינה בטוחה של המנוע
+try:
+    from engines import init_db, get_leads_data, setup_page_styling
+except ImportError:
+    st.error("שגיאה בטעינת קובצי המערכת (engines.py). ודא שאתה מריץ את האפליקציה מהתיקייה הראשית.")
+    st.stop()
 
-# --- Global Styling ---
-if 'dark_mode' not in st.session_state:
-    st.session_state.dark_mode = False
-st.session_state.dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=st.session_state.dark_mode, key="dark_mode_toggle")
+# החלת עיצוב
+setup_page_styling()
 
-if st.session_state.dark_mode:
-    PLOT_THEME = "plotly_dark"
-    TEXT_COLOR = "#ffffff"
-else:
-    PLOT_THEME = "plotly_white"
-    TEXT_COLOR = "#000000"
+st.title("📊 דשבורד מנהלים")
+st.markdown("כאן תוכל לראות את ביצועי העסק בזמן אמת, מבוסס על נתוני הלידים והעסקאות.")
 
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{ direction: rtl; text-align: right; }}
-    ul[role="listbox"] li {{ text-align: right; direction: rtl; }}
-</style>
-""", unsafe_allow_html=True)
-
-# --- Database Connection ---
+# חיבור למסד ושליפת נתונים
 conn = init_db()
-
-# --- Main Page ---
-st.title("📊 דשבורד מנהלים מתקדם")
-
 df = get_leads_data(conn)
 
 if df.empty:
-    st.warning("אין נתונים להצגה. בדוק אם קובץ מסד הנתונים `leads_pro_ultimate.db` קיים ואינו ריק.")
+    st.warning("📭 אין כרגע נתונים במערכת. הוסף לידים כדי לראות את הדשבורד בפעולה.")
 else:
-    # KPIs Row 1
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-    total_revenue = df[df['status'] == 'נמכר']['estimated_commission'].sum()
-    kpi1.metric("💰 סה'כ הכנסות", f"₪{total_revenue:,.0f}")
-    kpi2.metric("📊 סה'כ לידים", len(df))
-    # ... (other KPIs)
+    # --- סינון נתונים (Sidebar) ---
+    st.sidebar.header("סינון נתונים")
+    # נוודא שהעמודה קיימת לפני הסינון
+    if 'status' in df.columns:
+        status_options = df['status'].unique().tolist()
+        selected_statuses = st.sidebar.multiselect("בחר סטטוסים:", status_options, default=status_options)
+        filtered_df = df[df['status'].isin(selected_statuses)]
+    else:
+        filtered_df = df
+
+    # --- KPI Cards ---
+    st.subheader("מדדי מפתח")
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("סה״כ לידים (בסינון הנוכחי)", len(filtered_df))
+
+    if 'estimated_commission' in filtered_df.columns and 'status' in filtered_df.columns:
+        total_rev = filtered_df[filtered_df['status'] == 'נמכר']['estimated_commission'].sum()
+        col2.metric("הכנסות ממכירות", f"₪{total_rev:,.0f}")
+    else:
+        col2.metric("הכנסות ממכירות", "₪0")
+
+    if 'lead_score' in filtered_df.columns:
+        avg_score = filtered_df['lead_score'].mean()
+        col3.metric("איכות ליד ממוצעת", f"{avg_score:.1f}/100")
+    else:
+        col3.metric("איכות ליד ממוצעת", "לא ידוע")
 
     st.divider()
 
-    # Charts
-    chart1, chart2 = st.columns(2)
-    with chart1:
-        st.subheader("📊 התפלגות סטטוסים")
-        status_counts = df['status'].value_counts()
-        fig_status = px.pie(
-            values=status_counts.values,
-            names=status_counts.index,
-            title="סטטוסי לידים",
-            template=PLOT_THEME
-        )
-        st.plotly_chart(fig_status, use_container_width=True)
+    # --- גרפים (Plotly) ---
+    chart_col1, chart_col2 = st.columns(2)
 
-    # ... (other charts)
+    with chart_col1:
+        st.subheader("פילוח לידים לפי סטטוס")
+        if 'status' in filtered_df.columns and not filtered_df.empty:
+            status_counts = filtered_df['status'].value_counts().reset_index()
+            status_counts.columns = ['סטטוס', 'כמות']
+
+            fig_status = px.pie(
+                status_counts,
+                names='סטטוס',
+                values='כמות',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig_status.update_layout(font=dict(family="Heebo, Arial, sans-serif"))
+            st.plotly_chart(fig_status, use_container_width=True)
+        else:
+            st.info("אין נתוני סטטוס להצגה.")
+
+    with chart_col2:
+        st.subheader("מקורות הגעה (Sources)")
+        if 'source' in filtered_df.columns and not filtered_df.empty:
+            source_counts = filtered_df['source'].value_counts().reset_index()
+            source_counts.columns = ['מקור', 'כמות']
+
+            fig_source = px.bar(
+                source_counts,
+                x='מקור',
+                y='כמות',
+                color='מקור',
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig_source.update_layout(font=dict(family="Heebo, Arial, sans-serif"), showlegend=False)
+            st.plotly_chart(fig_source, use_container_width=True)
+        else:
+            st.info("אין נתוני מקור להצגה.")

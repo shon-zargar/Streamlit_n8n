@@ -107,11 +107,6 @@ COMMISSION_RATES = {
     "הכשרה": {"רכב": 14, "בריאות": 13, "פנסיוני": 18, "חיים": 25, "משכנתה": 20, "דירה": 11},
 }
 
-class FinConfig:
-    """הגדרות וקבועים עבור Open Finance 2026"""
-    TAX_FREE_THRESHOLD = 7500
-    AMENDMENT_190_AGE = 60
-    MANAGEMENT_FEE_MAX = 1.05
 
 # ==========================================
 # Database Functions
@@ -142,6 +137,14 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER, filename TEXT, file_data BLOB, 
         file_type TEXT, upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
         FOREIGN KEY(lead_id) REFERENCES leads(id) ON DELETE CASCADE)''')
+
+    # הטבלה החדשה ש-n8n יעדכן
+    c.execute('''CREATE TABLE IF NOT EXISTS market_indices (
+        name TEXT PRIMARY KEY,
+        value REAL,
+        change_pct REAL,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
     conn.commit()
     return conn
 
@@ -221,7 +224,8 @@ class N8nIntegration:
         "NEW_LEAD": "http://localhost:5678/webhook-test/new-lead",
         "STATUS_CHANGE": "http://localhost:5678/webhook-test/status-change",
         "TASK_WEBHOOK_URL": "http://localhost:5678/webhook-test/crm-tasks-gateway",
-        "NOTIFY_WEBHOOK_URL": "http://localhost:5678/webhook-test/crm-tasks-gateway"
+        "NOTIFY_WEBHOOK_URL": "http://localhost:5678/webhook-test/crm-tasks-gateway",
+        "REFRESH_MARKET_DATA": "http://localhost:5678/webhook-test/refresh-market"  # כתובת ה-webhook לעדכון מדדים
     }
 
     @staticmethod
@@ -258,21 +262,6 @@ class TelegramNotifier:
 
 
 # ==========================================
-# Open Finance & Data Ingestion
-# ==========================================
-class DataIngestionLayer:
-    """שכבת קליטת נתונים (HAR/מסלקה)"""
-    @staticmethod
-    def process_har_file(uploaded_file):
-        if not HarParser: return {"error": "HarParser missing"}
-        try:
-            har_data = json.loads(uploaded_file.read().decode('utf-8'))
-            parser = HarParser(har_data)
-            return {"status": "success", "count": len(parser.pages)}
-        except Exception as e:
-            return {"error": str(e)}
-
-# ==========================================
 # Finance & AI Engines
 # ==========================================
 class FinanceEngine:
@@ -280,18 +269,6 @@ class FinanceEngine:
     def calculate_smart_commission(comp, prod, prem):
         rate = COMMISSION_RATES.get(comp, {}).get(prod, 10)
         return prem * (rate / 100) * 12
-
-    @staticmethod
-    def calc_amendment_190(deposit_amount, age):
-        """חישוב כדאיות תיקון 190"""
-        tax_benefit = deposit_amount * 0.15 # הנחת מס רווח הון מופחת
-        return {"benefit": tax_benefit, "eligible": age >= FinConfig.AMENDMENT_190_AGE}
-
-    @staticmethod
-    def calc_management_fees(current_balance, current_fee, offered_fee):
-        """חישוב חיסכון בדמי ניהול"""
-        yearly_save = current_balance * (current_fee - offered_fee) / 100
-        return {"yearly_save": yearly_save, "10_year_save": yearly_save * 10}
 
 
 class AIEngine:
@@ -406,22 +383,6 @@ def generate_hebrew_pdf(lead):
     buffer.seek(0)
     return buffer
 
-def generate_branded_calc_pdf(lead_name, data):
-    """ייצור PDF ממותג עבור מחשבוני Open Finance"""
-    has_font = setup_hebrew_font()
-    font_name = 'Heebo' if has_font else 'Helvetica'
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    title_style = ParagraphStyle(name='T', fontName=font_name, fontSize=16, alignment=TA_CENTER)
-    normal_style = ParagraphStyle(name='N', fontName=font_name, fontSize=12, alignment=TA_RIGHT)
-    elements = [
-        Paragraph(fix_text(f"דוח פיננסי: {lead_name}"), title_style),
-        Spacer(1, 20),
-        Paragraph(fix_text(f"נתוני חישוב: {str(data)}"), normal_style)
-    ]
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
 
 # ==========================================
 # Market Data Functions
@@ -437,10 +398,32 @@ def get_boi_rates():
                 code = currency.find('CURRENCYCODE').text
                 if code in ['USD', 'EUR']:
                     data.append(
-                        {"מדד": "דולר 🇺🇸" if code == 'USD' else "אירו 🇪🇺", "שער": float(currency.find('RATE').text)})
+                        {"מדד": "דולר 🇺🇸" if code == 'USD' else "אירו 🇪🇺", "שער": float(currency.find('RATE').text),
+                         "שינוי": 0.0})
     except:
         pass
     return data
+
+
+def get_market_data_from_db(conn):
+    try:
+        df = pd.read_sql("SELECT name as מדד, value as שער, change_pct as שינוי FROM market_indices", conn)
+        return df.to_dict('records')
+    except:
+        return []
+
+
+def update_market_index(conn, name, value, change_pct):
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO market_indices (name, value, change_pct, last_updated)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(name) DO UPDATE SET
+        value=excluded.value,
+        change_pct=excluded.change_pct,
+        last_updated=CURRENT_TIMESTAMP
+    """, (name, value, change_pct))
+    conn.commit()
 
 
 # ==========================================

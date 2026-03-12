@@ -1,107 +1,123 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, date, timedelta
-import time
+import sqlite3
 import json
+from datetime import datetime, date
+import time
 
-from engines import (
-    init_db, calculate_smart_commission, N8nIntegration, TelegramNotifier,
-    COMMISSION_RATES
-)
+# --- 1. הגדרת העמוד ---
+st.set_page_config(layout="wide", page_title="ליד חדש", page_icon="➕")
 
-# --- Page Configuration ---
-st.set_page_config(layout="wide", page_title="הוספת ליד חדש")
+# --- 2. אבטחה וניהול זיכרון ---
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="new_lead_dark_mode")
-if dark_mode:
-    TEXT_COLOR = "#ffffff"
-else:
-    TEXT_COLOR = "#000000"
+# --- 3. טעינה מאובטחת של המנוע ---
+try:
+    from engines import init_db, setup_page_styling
 
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-</style>
-""", unsafe_allow_html=True)
+    setup_page_styling()
+except ImportError:
+    st.error("שגיאה בטעינת קובצי המערכת (engines.py). ודא שאתה מריץ מהתיקייה הראשית.")
+    st.stop()
 
-# --- Constants ---
-SOURCE_OPTIONS = ["פייסבוק", "גוגל", "חבר מביא חבר", "אינסטגרם", "טיקטוק", "רכישת לידים", "LinkedIn", "אתר אינטרנט",
-                  "אחר"]
+st.title("➕ הוספת ליד חדש למערכת")
+st.markdown("מלא את פרטי הלקוח. שדות המסומנים ב-**(*)** הם חובה. את שאר הנתונים תוכל להשלים מאוחר יותר מכרטיס הלקוח.")
 
-# --- Database Connection ---
-conn = init_db()
-
-# --- Main Page ---
-st.title("➕ הוספת ליד חדש")
-
-with st.form("add_lead_ultimate"):
-    st.subheader("📋 פרטים אישיים")
-
-    # שורה ראשונה - פרטי יצירת קשר בסיסיים
-    col1, col2, col3 = st.columns(3)
-    new_name = col1.text_input("שם מלא *")
-    new_phone = col2.text_input("טלפון *")
-    new_email = col3.text_input("אימייל")
-
-    # שורה שנייה - זיהוי ותאריכים (התאמה לשדרוג ה-OCR)
-    col4, col5, col6, col7 = st.columns(4)
-    new_id_number = col4.text_input("תעודת זהות")
-    new_issue_date = col5.text_input("תאריך הנפקה") # השדה החדש
-    new_expiry_date = col6.text_input("תאריך תוקף")   # שונה מ-"הנפקה/תוקף"
-    new_source = col7.selectbox("מקור ליד", SOURCE_OPTIONS)
+# --- טופס הזנת נתונים מורחב ---
+with st.form("new_lead_form", clear_on_submit=False):
+    # --- פרטי קשר ---
+    st.subheader("📞 פרטי יצירת קשר")
+    col1, col2, col3, col4 = st.columns(4)
+    name = col1.text_input("שם מלא *", placeholder="ישראל ישראלי")
+    phone = col2.text_input("טלפון *", placeholder="050-0000000")
+    email = col3.text_input("כתובת אימייל", placeholder="example@gmail.com")
+    source_options = ["פייסבוק", "גוגל", "חבר מביא חבר", "אינסטגרם", "טיקטוק", "וואטסאפ", "שיחה נכנסת", "אתר אינטרנט",
+                      "אחר"]
+    source = col4.selectbox("מקור הגעה", source_options)
 
     st.divider()
-    st.subheader("💼 תיק ביטוחי")
-    default_policies = pd.DataFrame([{"type": "בחר...", "company": "בחר...", "prem": 0}])
-    policy_config = {
-        "type": st.column_config.SelectboxColumn("מוצר",
-                                                 options=["רכב", "דירה", "בריאות", "חיים", "פנסיוני", "משכנתה"]),
-        "company": st.column_config.SelectboxColumn("חברה", options=list(COMMISSION_RATES.keys())),
-        "prem": st.column_config.NumberColumn("פרמיה חודשית", format="₪%.0f")
-    }
-    new_policies = st.data_editor(default_policies, column_config=policy_config, num_rows="dynamic",
-                                  use_container_width=True)
+
+    # --- פרטי זיהוי ודמוגרפיה ---
+    st.subheader("🪪 פרטי זיהוי ודמוגרפיה")
+    col_id1, col_id2, col_id3 = st.columns(3)
+    id_number = col_id1.text_input("מספר תעודת זהות")
+    issue_date = col_id2.text_input("תאריך הנפקה (לדוגמה: 01/01/2020)")
+    expiry_date = col_id3.text_input("תאריך תוקף (לדוגמה: 01/01/2030)")
+
+    col_dem1, col_dem2, col_dem3 = st.columns(3)
+    birth_date = col_dem1.date_input("תאריך לידה", value=None, min_value=date(1920, 1, 1),
+                                     max_value=datetime.now().date())
+    marital_status = col_dem2.selectbox("סטטוס משפחתי", ["", "רווק/ה", "נשוי/ה", "גרוש/ה", "אלמן/ה"])
+    children = col_dem3.number_input("מספר ילדים", min_value=0, max_value=20, value=0, step=1)
 
     st.divider()
-    st.subheader("⏰ תזמון והערות")
-    new_callback = st.date_input("📅 תאריך חזרה", datetime.now() + timedelta(days=1))
-    new_notes = st.text_area("📝 הערות ראשוניות")
 
-    submitted = st.form_submit_button("💾 שמור ליד", type="primary", use_container_width=True)
+    # --- תזמון והערות ---
+    st.subheader("🗓️ תזמון והערות")
+    col_time1, col_time2 = st.columns(2)
+    callback_date = col_time1.date_input("תאריך לחזרה מתוכנן", value=datetime.now().date())
+    renewal_date = col_time2.date_input("תאריך לחידוש ביטוח (אופציונלי)", value=None)
 
-    if submitted:
-        if not new_name or not new_phone:
-            st.error("❌ חובה למלא שם וטלפון!")
+    notes = st.text_area("הערות ראשוניות (מה הלקוח מחפש? צרכים מיוחדים?)", height=100)
+
+    st.divider()
+
+    # --- כפתור שמירה ---
+    submit_btn = st.form_submit_button("💾 שמור וצור תיק לקוח", type="primary", use_container_width=True)
+
+    if submit_btn:
+        # בדיקת ולידציה לשדות חובה
+        if not name or not phone:
+            st.error("⚠️ נא למלא את שדות החובה: שם וטלפון.")
         else:
-            valid_policies = [p for p in new_policies.to_dict('records') if p.get('type') != "בחר..."]
-            total_premium = sum(p['prem'] for p in valid_policies)
-            total_commission = sum(
-                calculate_smart_commission(p['company'], p['type'], p['prem']) for p in valid_policies)
-            policies_json = json.dumps(valid_policies, ensure_ascii=False)
+            with st.spinner("מקים תיק לקוח ושומר נתונים..."):
+                try:
+                    conn = init_db()
+                    cursor = conn.cursor()
 
-            # עדכון השאילתה לכלול את כל 13 השדות (כולל issue_date)
-            conn.execute("""
-                INSERT INTO leads (name, phone, id_number, expiry_date, issue_date, email, source, policies_json, monthly_premium, estimated_commission, callback_date, notes, lead_score) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (new_name, new_phone, new_id_number, new_expiry_date, new_issue_date, new_email, new_source, policies_json,
-                  total_premium, total_commission, new_callback.strftime('%Y-%m-%d'), new_notes, 50))
-            conn.commit()
+                    # יצירת מבנה ברירת מחדל לפוליסות כדי למנוע קריסה בכרטיס הלקוח
+                    policies_json = json.dumps([{"type": "בחר...", "company": "בחר...", "prem": 0}], ensure_ascii=False)
 
-            lead_payload = {"name": new_name, "phone": new_phone, "email": new_email, "source": new_source,
-                            "status": "חדש"}
-            N8nIntegration.notify_new_lead(lead_payload)
+                    # המרת תאריכים למחרוזות שמתאימות ל-SQLite
+                    b_date_str = birth_date.strftime('%Y-%m-%d') if birth_date else None
+                    c_date_str = callback_date.strftime('%Y-%m-%d') if callback_date else datetime.now().strftime(
+                        '%Y-%m-%d')
+                    r_date_str = renewal_date.strftime('%Y-%m-%d') if renewal_date else None
 
-            st.success("✅ ליד נשמר בהצלחה!")
-            st.balloons()
-            time.sleep(1.5)
-            st.rerun()
+                    # הכנסה בטוחה ומלאה למסד הנתונים
+                    cursor.execute("""
+                        INSERT INTO leads (
+                            name, phone, email, source, id_number, issue_date, expiry_date,
+                            birth_date, marital_status, children, policies_json, 
+                            callback_date, renewal_date, notes, status, lead_score, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (
+                        name.strip(),
+                        phone.strip(),
+                        email.strip(),
+                        source,
+                        id_number.strip(),
+                        issue_date.strip(),
+                        expiry_date.strip(),
+                        b_date_str,
+                        marital_status,
+                        children,
+                        policies_json,
+                        c_date_str,
+                        r_date_str,
+                        notes.strip(),
+                        'חדש',
+                        50  # הציון ההתחלתי שנתת במנוע ה-AI
+                    ))
+
+                    conn.commit()
+                    conn.close()
+
+                    st.success(f"🎉 הליד '{name}' נוסף בהצלחה למערכת!")
+                    time.sleep(1.5)  # השהייה קלה לקריאת ההודעה
+
+                    # הקפצה אוטומטית לטבלת הלידים!
+                    st.switch_page("pages/4_📋_טבלת_לידים.py")
+
+                except Exception as e:
+                    st.error(f"❌ אירעה שגיאה בשמירת הליד במסד הנתונים: {e}")

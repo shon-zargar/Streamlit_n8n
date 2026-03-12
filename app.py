@@ -6,15 +6,10 @@ import threading
 from flask import Flask, jsonify, request
 import json
 import sqlite3
-
-# Import necessary functions for the main page and global setup
-from engines import (
-    init_db, get_stats, setup_page_styling, get_leads_data,
-    calculate_conversion_rate
-)
+import os
 
 # ==========================================
-# 1. Page Configuration & Global Styling
+# 1. Page Configuration (חייב להיות הראשון!)
 # ==========================================
 st.set_page_config(
     page_title="LeadFlow Pro X - Ultimate",
@@ -23,24 +18,65 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Run the global styling function from engines.py
-theme = setup_page_styling()
 
-# --- Database Connection ---
-conn = init_db()
+# ==========================================
+# 2. אתחול Session State (למניעת KeyErrors)
+# ==========================================
+def init_session_state():
+    # אתחול נתיב שורש
+    if 'root_path' not in st.session_state:
+        st.session_state['root_path'] = os.getcwd()
 
-# --- API Server (n8n Integration) ---
+    # אתחול טבלת לידים אם אינה קיימת (מונע קריסה בדפים המסתמכים עליה)
+    if 'leads' not in st.session_state:
+        st.session_state['leads'] = pd.DataFrame(columns=[
+            'id', 'name', 'phone', 'email', 'source', 'policies_json',
+            'callback_date', 'notes', 'status', 'lead_score', 'created_at', 'estimated_commission'
+        ])
+
+    # אתחול טבלת משימות
+    if 'tasks' not in st.session_state:
+        st.session_state['tasks'] = []
+
+    # עקיפת או הגדרת סטטוס חיבור (אופציונלי למטרות פיתוח)
+    if 'auth_status' not in st.session_state:
+        st.session_state['auth_status'] = True
+
+
+init_session_state()
+
+# ייבוא פונקציות עזר (מומלץ לבצע לאחר set_page_config ואתחול ראשוני)
+try:
+    from engines import (
+        init_db, get_stats, setup_page_styling, get_leads_data,
+        calculate_conversion_rate
+    )
+
+    # הפעלת עיצוב המערכת
+    theme = setup_page_styling()
+except ImportError as e:
+    st.error(f"שגיאה בטעינת קובץ המנוע (engines.py). אנא ודא שהוא נמצא בתיקיית השורש. פרטים: {e}")
+    st.stop()
+
+# --- חיבור למסד הנתונים ---
+try:
+    conn = init_db()
+except Exception as e:
+    st.error(f"שגיאה בחיבור למסד הנתונים: {e}")
+    conn = None
+
+# ==========================================
+# 3. הגדרות שרת ה-API (Flask) באמצעות Threading
+# ==========================================
 app = Flask(__name__)
 
 
-# 1. קבלת נתונים קיימים (GET)
 @app.route('/stats', methods=['GET'])
 def api_stats():
     data = get_stats()
     return jsonify(data)
 
 
-# 2. הוספת ליד חדש (POST)
 @app.route('/api/leads/add', methods=['POST'])
 def api_add_lead():
     data = request.json
@@ -54,11 +90,8 @@ def api_add_lead():
     notes = data.get('notes', 'נוסף דרך הטלגרם')
 
     try:
-        # פתיחת חיבור למסד הנתונים
         db_conn = sqlite3.connect('leads_pro_ultimate.db', check_same_thread=False)
         cursor = db_conn.cursor()
-
-        # יצירת JSON ריק לפוליסות כברירת מחדל
         policies_json = json.dumps([{"type": "בחר...", "company": "בחר...", "prem": 0}], ensure_ascii=False)
         callback_date = datetime.now().strftime('%Y-%m-%d')
 
@@ -76,7 +109,6 @@ def api_add_lead():
         return jsonify({"error": str(e)}), 500
 
 
-# 3. הוספת משימה ליומן/למערכת (POST)
 @app.route('/api/tasks/add', methods=['POST'])
 def api_add_task():
     data = request.json
@@ -100,12 +132,11 @@ def api_add_task():
         return jsonify({"error": str(e)}), 500
 
 
-# 4. תיעוד אינטראקציה (למשל: נשלח וואטסאפ אוטומטי, יום הולדת)
 @app.route('/api/interactions/add', methods=['POST'])
 def api_add_interaction():
     data = request.json
     lead_id = data.get('lead_id')
-    i_type = data.get('type', 'אוטומציה')  # למשל: WhatsApp / SMS
+    i_type = data.get('type', 'אוטומציה')
     summary = data.get('summary')
 
     if not lead_id or not summary:
@@ -123,19 +154,53 @@ def api_add_interaction():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/update_lead', methods=['POST'])
+def update_lead():
+    try:
+        data = request.json
+        full_name = data.get('full_name', '').strip()
+        id_number = data.get('id_number', '').strip()
+        expiry_date = data.get('expiry_date', '').strip()
+
+        db_conn = sqlite3.connect('leads_pro_ultimate.db')
+        cursor = db_conn.cursor()
+
+        search_term = full_name.split()[0] if full_name else ""
+        cursor.execute('SELECT name FROM leads WHERE name LIKE ?', (f"%{search_term}%",))
+        result = cursor.fetchone()
+
+        if result:
+            actual_name = result[0]
+            cursor.execute('''
+                UPDATE leads 
+                SET id_number = ?, expiry_date = ? 
+                WHERE name = ?
+            ''', (id_number, expiry_date, actual_name))
+            db_conn.commit()
+            msg = f"Updated lead: {actual_name}"
+        else:
+            msg = f"No lead found containing: {search_term}"
+
+        db_conn.close()
+        return jsonify({"status": "success", "message": msg}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 def run_api():
     app.run(port=8502, host='0.0.0.0', debug=False, use_reloader=False)
 
 
+# הפעלת השרת רק אם השרשור לא קיים עדיין (חשוב בסביבת Streamlit)
 if not any(t.name == "n8n_api" for t in threading.enumerate()):
     threading.Thread(target=run_api, name="n8n_api", daemon=True).start()
 
 # ==========================================
-# 2. Main Home Page Content
+# 4. תוכן דף הבית
 # ==========================================
 st.title("🏠 ברוכים הבאים ל-LeadFlow Pro X Ultimate")
 
-st.markdown(f"""
+st.markdown("""
 <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
             padding: 40px; border-radius: 15px; text-align: center; color: white; margin-bottom: 30px;'>
     <h1 style='color: white; margin: 0;'>💎 LeadFlow Pro X Ultimate</h1>
@@ -145,7 +210,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- Quick Actions ---
+# --- פעולות מהירות ---
 st.subheader("⚡ פעולות מהירות")
 qcol1, qcol2, qcol3, qcol4 = st.columns(4)
 
@@ -164,37 +229,69 @@ with qcol4:
 
 st.divider()
 
-# --- Today's Summary ---
+# --- סיכום יומי ---
 col1, col2, col3, col4 = st.columns(4)
-df_home = get_leads_data(conn)
+
+if conn:
+    df_home = get_leads_data(conn)
+else:
+    df_home = pd.DataFrame()
 
 if not df_home.empty:
     today = datetime.now().strftime('%Y-%m-%d')
-    urgent_today = len(df_home[(df_home['callback_date'] <= today) & (~df_home['status'].isin(['נמכר', 'לא רלוונטי']))])
+    # חישוב הלידים הדחופים
+    if 'callback_date' in df_home.columns and 'status' in df_home.columns:
+        urgent_today = len(
+            df_home[(df_home['callback_date'] <= today) & (~df_home['status'].isin(['נמכר', 'לא רלוונטי']))])
+    else:
+        urgent_today = 0
 
     current_month_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
-    month_sales_df = df_home[(df_home['status'] == 'נמכר') & (df_home['created_at'] >= current_month_start)]
-    month_sales = len(month_sales_df)
-    month_revenue = month_sales_df['estimated_commission'].sum()
+
+    # חישוב מכירות החודש והכנסות
+    if 'status' in df_home.columns and 'created_at' in df_home.columns and 'estimated_commission' in df_home.columns:
+        month_sales_df = df_home[(df_home['status'] == 'נמכר') & (df_home['created_at'] >= current_month_start)]
+        month_sales = len(month_sales_df)
+        month_revenue = month_sales_df['estimated_commission'].sum()
+    else:
+        month_sales = 0
+        month_revenue = 0
 
     col1.metric("🚨 דחופים להיום", urgent_today)
     col2.metric("💰 הכנסות החודש", f"₪{month_revenue:,.0f}")
     col3.metric("✅ מכירות החודש", month_sales)
-    col4.metric("📊 Conversion Rate", f"{calculate_conversion_rate(conn):.1f}%")
+
+    conversion_rate = calculate_conversion_rate(conn) if conn else 0.0
+    col4.metric("📊 Conversion Rate", f"{conversion_rate:.1f}%")
+else:
+    st.info("לא נמצאו נתונים להצגה בסיכום היומי.")
 
 st.divider()
 
-# --- Recent Activity ---
+# --- פעילות אחרונה ---
 st.subheader("🕐 פעילות אחרונה")
 if not df_home.empty:
-    recent = df_home.head(5)[['name', 'phone', 'status', 'callback_date', 'estimated_commission']]
-    recent.columns = ['שם', 'טלפון', 'סטטוס', 'חזרה', 'עמלה']
-    st.dataframe(recent, use_container_width=True, hide_index=True)
+    columns_to_show = ['name', 'phone', 'status', 'callback_date', 'estimated_commission']
+    # וידוא שכל העמודות הנדרשות קיימות ב-DataFrame
+    available_cols = [col for col in columns_to_show if col in df_home.columns]
+
+    if available_cols:
+        recent = df_home.head(5)[available_cols]
+        # מילון תרגום לשמות עמודות בעברית (רק לאלו שקיימות)
+        heb_columns = {
+            'name': 'שם', 'phone': 'טלפון', 'status': 'סטטוס',
+            'callback_date': 'חזרה', 'estimated_commission': 'עמלה'
+        }
+        recent.columns = [heb_columns.get(c, c) for c in available_cols]
+        st.dataframe(recent, use_container_width=True, hide_index=True)
+    else:
+        st.warning("הנתונים הקיימים אינם מכילים את העמודות הנדרשות לתצוגת פעילות אחרונה.")
 else:
     st.info("אין לידים במערכת. התחל בהוספת ליד ראשון!")
 
-# --- Tips ---
 st.divider()
+
+# --- טיפים מהירים ---
 st.subheader("💡 טיפים מהירים")
 tips = [
     "השתמש ב-Focus Mode לניהול משימות יומיות ממוקד.",
@@ -204,45 +301,3 @@ tips = [
     "גבה את המערכת באופן קבוע דרך מסך ההגדרות."
 ]
 st.info(f"💡 {random.choice(tips)}")
-
-app_api = Flask(__name__)
-
-
-@app_api.route('/api/update_lead', methods=['POST'])
-def update_lead():
-    try:
-        data = request.json
-        full_name = data.get('full_name').strip()  # ניקוי רווחים
-        id_number = data.get('id_number').strip()
-        expiry_date = data.get('expiry_date').strip()
-
-        conn = sqlite3.connect('leads_pro_ultimate.db')
-        cursor = conn.cursor()
-
-        # אנחנו מחפשים התאמה חלקית - אם השם מה-OCR נמצא בתוך השם ב-DB או להיפך
-        # ננסה קודם למצוא את הליד כדי לראות אם הוא קיים
-        search_term = full_name.split()[0]  # לוקח רק את השם הפרטי (למשל "שון")
-        cursor.execute('SELECT name FROM leads WHERE name LIKE ?', (f"%{search_term}%",))
-        result = cursor.fetchone()
-
-        if result:
-            actual_name = result[0]
-            cursor.execute('''
-                UPDATE leads 
-                SET id_number = ?, expiry_date = ? 
-                WHERE name = ?
-            ''', (id_number, expiry_date, actual_name))
-            conn.commit()
-            msg = f"Updated lead: {actual_name}"
-        else:
-            msg = f"No lead found containing: {search_term}"
-
-        conn.close()
-        return jsonify({"status": "success", "message": msg}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-if __name__ == "__main__":
-    # הפעלת ה-API ברקע
-    threading.Thread(target=run_api, daemon=True).start()
