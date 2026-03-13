@@ -1,115 +1,161 @@
 import streamlit as st
+import pandas as pd
 import random
-from datetime import datetime
+import time
 
-from engines import RealTimeDataEngine, setup_page_styling, generate_branded_calc_pdf
+# --- 1. הגדרת עמוד ---
+st.set_page_config(layout="wide", page_title="השוואת קופות גמל", page_icon="💰")
 
-# --- Page Configuration & Styling ---
-st.set_page_config(layout="wide", page_title="השוואת קופות גמל")
-theme = setup_page_styling()
+# --- 2. הגנת Session State ---
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Main Page ---
-st.title("💰 מערכת מושיקונט - השוואת קופות")
-st.caption(f"נתונים מעודכנים ליום: {datetime.now().strftime('%d/%m/%Y')}")
+# --- 3. ייבוא בטוח מהמנוע ---
+try:
+    from engines import (
+        init_db, setup_page_styling, RealTimeDataEngine,
+        generate_branded_calc_pdf, save_file
+    )
 
-# CSS לעיצוב כרטיסיות נכסנט
-st.markdown(f"""
-    <style>
-    .fund-card {{
-            background-color: {theme['card']}; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            overflow: hidden; margin-bottom: 20px; border-top: 4px solid #1f77b4;
-            direction: rtl; text-align: right;
-        }}
-        .fund-header {{
-            background-color: {theme['header']}; padding: 12px; border-bottom: 1px solid {theme['border']};
-            font-weight: bold; color: #1f77b4; font-size: 1.1em;
-        }}
-        .fund-metrics {{
-            display: flex; justify-content: space-between; padding: 15px;
-        }}
-        .metric-box {{
-            text-align: center; width: 30%;
-        }}
-        .metric-val {{ font-size: 1.4em; font-weight: bold; color: {theme['text']}; }}
-        .metric-lbl {{ font-size: 0.8em; color: #7f8c8d; }}
-        .fund-footer {{
-            background-color: {theme['header']}; padding: 10px; font-size: 0.9em; display: flex; justify-content: space-between;
-            color: {theme['text']};
-        }}
-    </style>
-    """, unsafe_allow_html=True)
+    theme = setup_page_styling()
+except ImportError as e:
+    st.error(f"שגיאת טעינה: חסרים רכיבים ב-engines.py. פרטים: {e}")
 
-# רשימת הקופות האמיתיות שאנו רוצים לעקוב אחריהן (מספרי אוצר אמיתיים)
-real_funds_ids = [15209, 1199, 723, 599, 1374, 874]
 
-# חברות למיפוי
-company_map = {15209: "הפניקס", 1199: "אנליסט", 723: "ילין לפידות", 599: "אלטשולר שחם", 1374: "מיטב", 874: "הראל"}
-names_map = {15209: "מסלול מניות", 1199: "מסלול כללי", 723: "מסלול מניות", 599: "מסלול כללי", 1374: "מחקי מדד S&P", 874: "מסלול משולב"}
+    # הגדרת אובייקטים חלופיים במקרה של שגיאה כדי שהדף לא יקרוס
+    class RealTimeDataEngine:
+        @staticmethod
+        def get_fund_data(fid):
+            return {
+                "name": f"קופה {fid} (גיבוי)", "yield_1y": 5.0,
+                "fees_accum": 0.5, "fees_dep": 0.0, "sharpe_ratio": 1.0
+            }
 
-# סרגל צד לפילטור
-with st.sidebar:
-    st.header("🔍 סינון מתקדם")
-    selected_comps = st.multiselect("בחר גופים", list(company_map.values()),
-                                    default=["הפניקס", "אנליסט", "אלטשולר שחם"])
-    risk_profile = st.selectbox("רמת סיכון", ["גבוה (מניות)", "בינוני (כללי)", "נמוך (אג'ח)"])
-    st.info("💡 הנתונים נשאבים ממאגרי המידע ומציגים תשואות חודשיות אחרונות ידועות.")
 
-# תצוגה ראשית
-cols = st.columns(3)
+    theme = {"plot": "plotly_white"}
 
-col_idx = 0
-for fid in real_funds_ids:
-    comp_name = company_map.get(fid, "כללי")
+# --- חיבור למסד נתונים ---
+try:
+    conn = init_db()
+except Exception as e:
+    st.error(f"שגיאת חיבור ל-DB: {e}")
+    conn = None
 
-    # סינון לפי בחירת משתמש
-    if comp_name not in selected_comps:
-        continue
+st.title("💰 השוואת קופות גמל וקרנות השתלמות")
+st.markdown("כלי זה מנתח נתונים בזמן אמת (מדמה התממשקות ל-GemelNet) להשוואת ביצועים.")
 
-    fund_data = RealTimeDataEngine.get_fund_data(fid)
-    if fund_data:
-        with cols[col_idx % 3]:
-            # HTML Card
-            st.markdown(f"""
-                <div class="fund-card">
-                    <div class="fund-header">
-                        {fund_data['name']} <span style='float:left; font-size:0.8em; color:gray'>#{fund_data['id']}</span>
-                    </div>
-                    <div class="fund-metrics">
-                        <div class="metric-box">
-                            <div class="metric-val" style="color: {'green' if fund_data['ytd'] > 0 else 'red'}">{fund_data['ytd']}%</div>
-                            <div class="metric-lbl">מתחילת שנה</div>
-                        </div>
-                        <div class="metric-box">
-                            <div class="metric-val">{fund_data['yield3y']}%</div>
-                            <div class="metric-lbl">3 שנים</div>
-                        </div>
-                        <div class="metric-box">
-                            <div class="metric-val">{fund_data['sharpe']}</div>
-                            <div class="metric-lbl">מדד שארפ</div>
-                        </div>
-                    </div>
-                    <div class="fund-footer">
-                        <span>💎 מנוהל: {random.uniform(1000, 50000):,.0f} מ' ₪</span>
-                        <span>דמי ניהול: 0.7%</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+# --- מסננים והגדרות השוואה ---
+with st.expander("🔍 הגדרות השוואה וסינון", expanded=True):
+    col1, col2, col3 = st.columns(3)
+    fund_type = col1.selectbox("סוג מוצר", ["קרן השתלמות", "קופת גמל להשקעה", "קופת גמל (חיסכון)"])
+    risk_level = col2.selectbox("רמת חשיפה למניות",
+                                ["כללי (עד 30%)", "מנייתי (75%-100%)", "סולידי (עד 10%)", "S&P 500"])
 
-            # כפתורי פעולה לכל קופה
-            b1, b2 = st.columns(2)
-            with b1:
-                # סימולטור אישי לכל קופה
-                popover = st.popover("🧮 סימולטור", key=f"popover_{fid}")
+    # סימולציה של רשימת קופות לבחירה
+    available_funds = [
+        "אלטשולר שחם השתלמות כללי", "הראל השתלמות S&P 500",
+        "מנורה מבטחים גמל מנייתי", "כלל השתלמות מחקה מדד",
+        "הפניקס גמל להשקעה סולידי"
+    ]
+    selected_funds = col3.multiselect("בחר קופות להשוואה (עד 3)", available_funds, default=available_funds[:2],
+                                      max_selections=3)
 
-                amount = popover.number_input(f"סכום להפקדה ({fid})", 10000, 5000000, 100000, key=f"amount_{fid}")
-                years = popover.slider("שנים", 1, 20, 5, key=f"years_{fid}")
+# --- לוגיקת ההשוואה ---
+if st.button("📊 בצע השוואה מקיפה", type="primary"):
+    if not selected_funds:
+        st.warning("אנא בחר לפחות קופה אחת להשוואה.")
+    else:
+        with st.spinner("שואב נתונים ממנוע RealTime..."):
+            time.sleep(1)  # הדמיית זמן טעינה
 
-                future_val = amount * ((1 + fund_data['ytd'] / 100) ** years)
-                popover.metric("צפי רווח", f"₪{future_val:,.0f}", delta=f"₪{future_val - amount:,.0f}")
+            # יצירת טבלת השוואה דינמית באמצעות ה-RealTimeDataEngine
+            comparison_data = []
+            for idx, fund_name in enumerate(selected_funds):
+                try:
+                    # שאיבה מהמנוע (מעבירים את האינדקס כמזהה מדומה)
+                    data = RealTimeDataEngine.get_fund_data(idx)
+                    comparison_data.append({
+                        "שם הקופה": fund_name,
+                        "תשואה 12 חודשים (%)": data.get("yield_1y", 0),
+                        "תשואה 3 שנים (%)": round(data.get("yield_1y", 0) * 2.8, 2),  # משוער
+                        "תשואה 5 שנים (%)": round(data.get("yield_1y", 0) * 4.5, 2),  # משוער
+                        "דמי ניהול ממוצעים (%)": data.get("fees_accum", 0),
+                        "מדד שארפ (סיכון)": data.get("sharpe_ratio", 1.0)
+                    })
+                except Exception as e:
+                    st.error(f"שגיאה בשליפת נתונים עבור {fund_name}: {e}")
 
-            with b2:
-                if st.button("📄 צור מסמך", key=f"doc_{fid}"):
-                    content = f"הצעת הצטרפות ל{fund_data['name']}\nמספר אוצר: {fid}\nתשואה שנתית: {fund_data['ytd']}%\nתשואה 3 שנים: {fund_data['yield3y']}%"
-                    pdf_file = generate_branded_calc_pdf(fund_data['name'], "דוח קופת גמל", content)
-                    st.download_button("📥 הורד PDF", pdf_file, f"fund_report_{fid}.pdf", "application/pdf")
-        col_idx += 1
+            if comparison_data:
+                df_compare = pd.DataFrame(comparison_data)
+
+                # --- תצוגת טבלה ---
+                st.subheader("טבלת השוואת ביצועים")
+                # הדגשת התשואה הגבוהה ביותר בשנה האחרונה
+                max_yield = df_compare["תשואה 12 חודשים (%)"].max()
+                st.dataframe(
+                    df_compare.style.highlight_max(
+                        subset=["תשואה 12 חודשים (%)", "תשואה 3 שנים (%)", "תשואה 5 שנים (%)", "מדד שארפ (סיכון)"],
+                        color="lightgreen")
+                    .highlight_min(subset=["דמי ניהול ממוצעים (%)"], color="lightgreen"),
+                    use_container_width=True, hide_index=True
+                )
+
+                # --- תצוגת גרפים ---
+                st.subheader("ניתוח ויזואלי")
+                gcol1, gcol2 = st.columns(2)
+
+                with gcol1:
+                    import plotly.express as px
+
+                    fig_yield = px.bar(df_compare, x="שם הקופה", y="תשואה 12 חודשים (%)",
+                                       title="תשואה בשנה האחרונה", color="שם הקופה",
+                                       template=theme.get('plot', 'plotly'))
+                    st.plotly_chart(fig_yield, use_container_width=True)
+
+                with gcol2:
+                    fig_fees = px.bar(df_compare, x="שם הקופה", y="דמי ניהול ממוצעים (%)",
+                                      title="השוואת דמי ניהול", color="שם הקופה", template=theme.get('plot', 'plotly'))
+                    st.plotly_chart(fig_fees, use_container_width=True)
+
+                # --- שמירת דוח (אם יש חיבור ל-DB) ---
+                if conn:
+                    st.divider()
+                    st.write("📄 **שמירת ההשוואה כדוח ללקוח**")
+                    try:
+                        from engines import get_leads_data
+
+                        leads = get_leads_data(conn)
+                        if not leads.empty and 'id' in leads.columns and 'name' in leads.columns:
+                            selected_lead = st.selectbox("בחר לקוח:", leads['id'].tolist(),
+                                                         format_func=lambda x: leads[leads['id'] == x]['name'].values[
+                                                             0])
+
+                            if st.button("הפק ושמור PDF", key="save_pdf"):
+                                try:
+                                    client_name = leads[leads['id'] == selected_lead]['name'].values[0]
+                                    pdf_buffer = generate_branded_calc_pdf({"name": client_name},
+                                                                           "דוח השוואת קופות גמל",
+                                                                           str(df_compare.to_dict()))
+
+
+                                    class MockFile:
+                                        def __init__(self, content, name):
+                                            self.content, self.name, self.type = content, name, "application/pdf"
+
+                                        def getvalue(self): return self.content
+
+                                        def read(self): return self.content
+
+
+                                    save_file(conn, selected_lead,
+                                              MockFile(pdf_buffer.getvalue(), f"Fund_Comparison_{date.today()}.pdf"))
+                                    st.success(f"הדוח הופק ונשמר בהצלחה בתיק של {client_name}!")
+                                except Exception as e:
+                                    st.error(f"שגיאה בהפקת ה-PDF: {e}")
+                        else:
+                            st.info("אין לקוחות במערכת להצמדת הדוח.")
+                    except ImportError:
+                        st.info("אפשרות שמירת הדוחות מושבתת כרגע.")
+
+if conn:
+    conn.close()

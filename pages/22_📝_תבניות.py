@@ -1,60 +1,82 @@
 import streamlit as st
+import pandas as pd
 import time
 
-from engines import init_db, get_templates
+# --- 1. הגדרת עמוד ---
+st.set_page_config(layout="wide", page_title="תבניות", page_icon="📝")
 
-# --- Page Configuration ---
-st.set_page_config(layout="wide", page_title="תבניות")
+# --- 2. הגנת Session State ---
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="templates_dark_mode")
-if dark_mode:
-    TEXT_COLOR = "#ffffff"
+# --- 3. ייבוא בטוח מהמנוע ---
+try:
+    from engines import init_db, get_templates, setup_page_styling
+
+    theme = setup_page_styling()
+except ImportError as e:
+    st.error(f"שגיאת טעינה: חסרים רכיבים ב-engines.py. פרטים: {e}")
+
+
+    # פונקציית גיבוי למניעת קריסה מוחלטת
+    def get_templates(conn=None):
+        return pd.DataFrame([
+            {"id": 1, "name": "הודעת שגיאה", "content": "חסר חיבור למנוע התבניות המרכזי."}
+        ])
+
+# --- חיבור למסד נתונים ---
+try:
+    conn = init_db()
+except Exception as e:
+    st.error(f"שגיאת חיבור ל-DB: {e}")
+    conn = None
+
+# --- 4. ממשק המשתמש ---
+st.title("📝 מאגר תבניות טקסט")
+st.markdown("כאן תוכל למצוא תבניות הודעה מוכנות מראש (WhatsApp, אימייל, SMS) לשימוש מהיר מול הלקוחות שלך.")
+
+# --- 5. משיכת נתונים בטוחה ---
+with st.spinner("טוען תבניות מהמערכת..."):
+    try:
+        # טיפול ב-TypeError למקרה שהמנוע הישן עדיין רץ בזיכרון
+        try:
+            df_templates = get_templates(conn)
+        except TypeError:
+            df_templates = get_templates()
+    except Exception as e:
+        st.error(f"שגיאה בשליפת תבניות: {e}")
+        df_templates = pd.DataFrame()
+
+# --- 6. תצוגת התבניות ---
+if df_templates.empty:
+    st.info("📭 אין תבניות במערכת כרגע. תוכל להוסיף תבניות חדשות דרך מנוע הניהול.")
 else:
-    TEXT_COLOR = "#000000"
+    st.success(f"נטענו {len(df_templates)} תבניות בהצלחה.")
+    st.divider()
 
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-</style>
-""", unsafe_allow_html=True)
+    # תצוגת רשת (Grid) של 3 עמודות
+    cols = st.columns(3)
 
-# --- Database Connection ---
-conn = init_db()
+    for index, row in df_templates.iterrows():
+        # שימוש במכולה מעוצבת לכל תבנית
+        with cols[index % 3].container(border=True):
+            template_name = row.get('name', f"תבנית מספר {index + 1}")
+            template_content = row.get('content', '')
 
-# --- Main Page ---
-st.title("📝 ניהול תבניות")
+            st.subheader(f"📌 {template_name}")
 
-with st.expander("➕ יצירת תבנית חדשה"):
-    with st.form("new_template"):
-        temp_name = st.text_input("שם התבנית")
-        temp_type = st.selectbox("סוג", ["WhatsApp", "Email", "SMS"])
-        temp_content = st.text_area("תוכן", placeholder="שלום {name}, ...")
-        if st.form_submit_button("💾 שמור תבנית"):
-            conn.execute("INSERT INTO templates (name, type, content) VALUES (?, ?, ?)", (temp_name, temp_type, temp_content))
-            conn.commit()
-            st.success("✅ תבנית נשמרה!")
-            time.sleep(0.5)
-            st.rerun()
+            # Text area מאפשר למשתמש להעתיק את הטקסט בקלות
+            st.text_area(
+                "תוכן ההודעה (העתק לשימוש):",
+                value=template_content,
+                height=150,
+                key=f"tpl_{row.get('id', index)}"
+            )
 
-templates = get_templates(conn)
-if not templates.empty:
-    st.subheader("📚 תבניות שמורות")
-    for _, temp in templates.iterrows():
-        with st.expander(f"{temp['name']} ({temp['type']})"):
-            st.code(temp['content'])
-            if st.button("🗑️ מחק", key=f"del_temp_{temp['id']}"):
-                conn.execute("DELETE FROM templates WHERE id=?", (temp['id'],))
-                conn.commit()
-                st.rerun()
-else:
-    st.info("אין תבניות שמורות")
+            # כפתור פעולה קטן שנותן פידבק
+            if st.button("✅ העתקתי את התוכן", key=f"btn_{row.get('id', index)}", use_container_width=True):
+                st.toast("מצוין! כעת תוכל להדביק את התבנית בוואטסאפ או במייל.")
+                time.sleep(0.5)
+
+if conn:
+    conn.close()

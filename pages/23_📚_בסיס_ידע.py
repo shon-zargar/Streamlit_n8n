@@ -1,60 +1,87 @@
 import streamlit as st
-import time
+import pandas as pd
 
-from engines import init_db, get_knowledge_base
+# --- 1. הגדרת עמוד ---
+st.set_page_config(layout="wide", page_title="בסיס ידע", page_icon="📚")
 
-# --- Page Configuration ---
-st.set_page_config(layout="wide", page_title="בסיס ידע")
+# --- 2. הגנת Session State ---
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="kb_dark_mode")
-if dark_mode:
-    TEXT_COLOR = "#ffffff"
+# --- 3. ייבוא בטוח מהמנוע ---
+try:
+    from engines import init_db, get_knowledge_base, setup_page_styling
+
+    theme = setup_page_styling()
+except ImportError as e:
+    st.error(f"שגיאת טעינה: חסרים רכיבים ב-engines.py. פרטים: {e}")
+
+
+    # פונקציית גיבוי למניעת קריסה
+    def get_knowledge_base(conn=None):
+        return pd.DataFrame([
+            {"id": 1, "topic": "שגיאת מערכת", "content": "המנוע המרכזי לא נטען כראוי. לא ניתן להציג מידע."}
+        ])
+
+
+    theme = {}
+
+# --- חיבור למסד נתונים ---
+try:
+    conn = init_db()
+except Exception as e:
+    st.error(f"שגיאת חיבור ל-DB: {e}")
+    conn = None
+
+# --- 4. ממשק המשתמש ---
+st.title("📚 בסיס ידע מקצועי")
+st.markdown("מאגר מידע, מאמרים מקצועיים, וסיכומי פוליסות לשליפה מהירה במהלך שיחות עם לקוחות.")
+
+# --- 5. משיכת נתונים בטוחה ---
+with st.spinner("טוען את מאגר המידע..."):
+    try:
+        # טיפול ב-TypeError למקרה שהמנוע הישן עדיין רץ בזיכרון השרת
+        try:
+            df_kb = get_knowledge_base(conn)
+        except TypeError:
+            df_kb = get_knowledge_base()
+    except Exception as e:
+        st.error(f"שגיאה בשליפת המידע: {e}")
+        df_kb = pd.DataFrame()
+
+# --- 6. תצוגת בסיס הידע ---
+if df_kb.empty:
+    st.info("📭 מאגר המידע ריק כרגע.")
 else:
-    TEXT_COLOR = "#000000"
+    # יצירת סרגל חיפוש חכם שלא קורס אם יש נתונים חסרים
+    search_term = st.text_input("🔍 חפש במאגר (לפי נושא או תוכן):",
+                                placeholder="למשל: פנסיה, אובדן כושר עבודה, בריאות...")
 
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-</style>
-""", unsafe_allow_html=True)
+    # סינון הנתונים
+    if search_term:
+        # מסנן שורות שכוללות את מילת החיפוש בכל עמודה שהיא
+        mask = df_kb.apply(lambda row: search_term.lower() in str(row.to_dict()).lower(), axis=1)
+        display_df = df_kb[mask]
+        st.caption(f"נמצאו {len(display_df)} תוצאות רלוונטיות עבור '{search_term}'")
+    else:
+        display_df = df_kb
 
-# --- Database Connection ---
-conn = init_db()
+    st.divider()
 
-# --- Main Page ---
-st.title("📚 מרכז ידע ולמידה")
+    if display_df.empty:
+        st.warning("לא נמצאו מאמרים התואמים את החיפוש שלך.")
+    else:
+        # תצוגה בצורת אקורדיונים (Expanders) נוחים וקריאים
+        for index, row in display_df.iterrows():
+            topic = row.get('topic', 'ללא נושא')
+            content = row.get('content', 'אין תוכן')
 
-with st.expander("➕ הוספת מאמר"):
-    with st.form("new_article"):
-        art_title = st.text_input("כותרת")
-        art_category = st.selectbox("קטגוריה", ["מוצרי ביטוח", "טכניקות מכירה", "חוקים ותקנות", "אחר"])
-        art_content = st.text_area("תוכן", height=200)
-        if st.form_submit_button("💾 שמור מאמר"):
-            conn.execute("INSERT INTO knowledge_base (title, category, content) VALUES (?, ?, ?)", (art_title, art_category, art_content))
-            conn.commit()
-            st.success("✅ מאמר נשמר!")
-            time.sleep(0.5)
-            st.rerun()
+            with st.expander(f"📖 {topic}"):
+                st.write(content)
 
-kb = get_knowledge_base(conn)
-if not kb.empty:
-    cat_filter = st.selectbox("סינון לפי קטגוריה", ["הכל"] + kb['category'].unique().tolist())
-    if cat_filter != "הכל":
-        kb = kb[kb['category'] == cat_filter]
-    
-    st.subheader(f"📖 מאמרים ({len(kb)})")
-    for _, article in kb.iterrows():
-        with st.expander(f"📄 {article['title']}"):
-            st.markdown(article['content'])
-else:
-    st.info("אין מאמרים בבסיס הידע")
+                # מציג את התוכן בתיבת טקסט כדי שיהיה קל להעתיק ולשלוח ללקוח
+                st.text_area("העתק טקסט מהיר לשליחה ללקוח:", value=content, height=100,
+                             key=f"kb_txt_{row.get('id', index)}")
+
+if conn:
+    conn.close()
