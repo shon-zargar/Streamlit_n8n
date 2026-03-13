@@ -1,35 +1,23 @@
 import streamlit as st
 import plotly.express as px
 
-from engines import get_boi_rates, get_dynamic_stock_data
+# --- 1. הגדרת עמוד ---
+st.set_page_config(layout="wide", page_title="שוק ההון", page_icon="📈")
 
-# --- Page Configuration ---
-st.set_page_config(layout="wide", page_title="שוק ההון")
+# --- 2. הגנת Session State ---
+if 'auth_status' not in st.session_state:
+    st.switch_page("app.py")
 
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="market_dark_mode")
-if dark_mode:
-    TEXT_COLOR, PLOT_THEME = "#ffffff", "plotly_dark"
-else:
-    TEXT_COLOR, PLOT_THEME = "#000000", "plotly_white"
+# --- 3. ייבוא בטוח מהמנוע (RULE 1) ---
+try:
+    from engines import get_boi_rates, get_dynamic_stock_data, setup_page_styling
+    theme = setup_page_styling()
+except ImportError as e:
+    st.error(f"שגיאת טעינה: {e}")
+    theme = {'plot': 'plotly_white'} # Fallback
+    st.stop()
 
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-</style>
-""", unsafe_allow_html=True)
-
-
-# --- Main Page ---
+# --- 4. ממשק המשתמש ---
 st.title("📈 שוק ההון - נתונים בזמן אמת")
 
 POPULAR_TICKERS = {
@@ -45,7 +33,6 @@ if custom_ticker:
     tickers_to_fetch[f"חיפוש: {custom_ticker.upper()}"] = custom_ticker.upper()
 
 with st.spinner("שואב נתוני אמת..."):
-    # בקשות REST ישירות דרך הפונקציות ב-engines
     boi_data = get_boi_rates()
     market_df = get_dynamic_stock_data(tickers_to_fetch)
 
@@ -54,11 +41,24 @@ all_metrics = boi_data + (market_df.to_dict('records') if not market_df.empty el
 cols = st.columns(4)
 for i, row in enumerate(all_metrics):
     with cols[i % 4]:
-        delta_color = "normal" if row['שינוי'] >= 0 else "inverse"
-        st.metric(label=row['מדד'], value=f"{row['שער']:,.2f}", delta=f"{row['שינוי']:+.2f}%", delta_color=delta_color)
+        delta_color = "normal" if row.get('שינוי', 0) >= 0 else "inverse"
+        st.metric(
+            label=row.get('מדד', 'N/A'), 
+            value=f"{row.get('שער', 0):,.2f}", 
+            delta=f"{row.get('שינוי', 0):+.2f}%", 
+            delta_color=delta_color
+        )
 
 if not market_df.empty:
     st.divider()
     st.subheader("📊 השוואת ביצועים")
-    fig = px.bar(market_df, x='מדד', y='שינוי', color='שינוי', color_continuous_scale='RdYlGn', template=PLOT_THEME)
+    # --- Chart Theming (RULE 3) ---
+    fig = px.bar(
+        market_df, 
+        x='מדד', 
+        y='שינוי', 
+        color='שינוי', 
+        color_continuous_scale='RdYlGn', 
+        template=theme.get('plot', 'plotly_white')
+    )
     st.plotly_chart(fig, use_container_width=True)

@@ -2,35 +2,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
+import plotly.express as px
 
-from engines import init_db
+from engines import init_db, setup_page_styling
 
-# --- Page Configuration ---
+# --- Page Configuration & Styling (RULE 1) ---
 st.set_page_config(layout="wide", page_title="ניהול הוצאות")
-
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="expenses_dark_mode")
-if dark_mode:
-    TEXT_COLOR = "#ffffff"
-else:
-    TEXT_COLOR = "#000000"
-
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-    .stDataFrame {{ direction: rtl; }}
-    .stDataFrame th, .stDataFrame td {{ text-align: right; }}
-</style>
-""", unsafe_allow_html=True)
+theme = setup_page_styling()
 
 # --- Database Connection ---
 conn = init_db()
@@ -55,7 +33,15 @@ with st.expander("➕ הוספת הוצאה"):
 expenses = pd.read_sql("SELECT * FROM expenses ORDER BY date DESC", conn)
 if not expenses.empty:
     st.metric("💸 סה'כ הוצאות", f"₪{expenses['amount'].sum():,.0f}")
-    st.bar_chart(expenses.groupby('category')['amount'].sum())
+    
+    # --- Chart Theming (RULE 3) ---
+    fig = px.bar(
+        expenses.groupby('category')['amount'].sum(),
+        title="הוצאות לפי קטגוריה",
+        template=theme.get('plot', 'plotly_white')
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
     st.dataframe(expenses, use_container_width=True, hide_index=True)
 else:
     st.info("אין הוצאות רשומות")

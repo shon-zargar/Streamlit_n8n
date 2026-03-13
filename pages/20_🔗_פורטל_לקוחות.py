@@ -1,32 +1,11 @@
 import streamlit as st
 import base64
 
-from engines import init_db, get_leads_data
+from engines import init_db, get_leads_data, setup_page_styling
 
-# --- Page Configuration ---
+# --- Page Configuration & Styling (RULE 1) ---
 st.set_page_config(layout="wide", page_title="פורטל לקוחות")
-
-# --- Global Styling ---
-dark_mode = st.sidebar.toggle("🌙 מצב לילה", value=False, key="portal_dark_mode")
-if dark_mode:
-    TEXT_COLOR = "#ffffff"
-else:
-    TEXT_COLOR = "#000000"
-
-st.markdown(f"""
-<style>
-    .stApp, .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label {{
-        direction: rtl;
-        text-align: right;
-        font-family: 'Heebo', sans-serif;
-        color: {TEXT_COLOR} !important;
-    }}
-    section[data-testid="stSidebar"] {{
-        direction: rtl;
-        text-align: right;
-    }}
-</style>
-""", unsafe_allow_html=True)
+theme = setup_page_styling()
 
 # --- Database Connection ---
 conn = init_db()
