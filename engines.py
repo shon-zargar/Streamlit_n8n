@@ -66,18 +66,17 @@ except ImportError:
 # 1. Global Styling & Constants
 # ==========================================
 def setup_page_styling():
-    """מגדיר את עיצוב העמוד ותומך במצב יום/לילה דינמי - גרסה חסינה לזיכרון וטבלאות"""
+    """מגדיר את עיצוב העמוד ותומך במצב יום/לילה דינמי - גרסה חסינה לזיכרון"""
 
     # 1. אתחול משתנה הזיכרון אם אינו קיים
     if 'dark_mode' not in st.session_state:
         st.session_state.dark_mode = False
 
-    # 2. פונקציית Callback שנועלת את הזיכרון בעת לחיצה!
-    # זה מה שפותר את איבוד מצב הלילה במעבר בין דפים (ובמיוחד ביומן)
+    # 2. פונקציית Callback שנועלת את הזיכרון בעת לחיצה
     def sync_theme_state():
         st.session_state.dark_mode = st.session_state.dark_mode_toggler
 
-    # 3. יצירת ה-Toggle עם חיבור ישיר לפונקציית הנעילה
+    # 3. יצירת ה-Toggle
     st.sidebar.toggle(
         "🌙 מצב לילה",
         value=st.session_state.dark_mode,
@@ -95,13 +94,12 @@ def setup_page_styling():
             "plot": "plotly_dark",
             "header": "#363945"
         }
-        # עיצוב מיוחד ללוח השנה במצב לילה כדי שלא יאבד את הצבעים
         calendar_css = f"""
-        .fc {{ background-color: {theme['card']} !important; color: {theme['text']} !important; border-radius: 10px; padding: 10px; }}
+        .fc {{ background-color: {theme['card']} !important; color: {theme['text']} !important; border-radius: 10px; padding: 10px; direction: ltr; }}
         .fc-theme-standard td, .fc-theme-standard th, .fc-theme-standard .fc-scrollgrid {{ border-color: {theme['border']} !important; }}
         .fc-button-primary {{ background-color: #3b82f6 !important; border-color: #3b82f6 !important; color: #ffffff !important; }}
         .fc-day-today {{ background-color: rgba(59, 130, 246, 0.15) !important; }}
-        .fc-list-day-cushion {{ background-color: {theme['header']} !important; color: {theme['text']} !important; }}
+        .fc-toolbar-title {{ color: {theme['text']} !important; }}
         """
     else:
         theme = {
@@ -113,47 +111,23 @@ def setup_page_styling():
             "plot": "plotly_white",
             "header": "#e0e2e6"
         }
-        calendar_css = ""
+        calendar_css = ".fc { direction: ltr !important; }"
 
-    # CSS מורחב לתיקון בעיות יישור אגרסיביות בטבלאות Canvas (Data Editor)
+    # CSS נקי וממוקד - מסיר קוד ששבר את ה-Canvas
     st.markdown(f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&display=swap');
 
-        /* עיצוב כללי של האפליקציה */
         .stApp {{ background-color: {theme['bg']}; color: {theme['text']}; font-family: 'Heebo', sans-serif; direction: rtl; }}
         .main, .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label, div {{ direction: rtl; text-align: right; color: {theme['text']} !important; }}
-
-        /* סרגל צד */
         section[data-testid="stSidebar"] {{ background-color: {theme['card']}; border-left: 1px solid {theme['border']}; direction: rtl; text-align: right; }}
 
-        /* ==============================================================
-           תיקון DataEditor וטבלאות - הכרחת ה-Canvas לחשב מרווחים לפי RTL
-           ============================================================== */
-        /* מחדיר הגדרת RTL ישירות לעטיפה של הרכיב הגרפי */
+        /* כפיית כיווניות על קונטיינר הטבלה */
         [data-testid="stDataFrame"], [data-testid="stDataEditor"] {{
             direction: rtl !important;
         }}
 
-        [data-testid="stDataFrame"] > div, [data-testid="stDataEditor"] > div {{
-            direction: rtl !important;
-            text-align: right !important;
-        }}
-
-        /* תיקון לפסקאות ואלמנטים פנימיים למניעת "קפיצת" אנגלית ומספרים שמאלה */
-        [data-testid="stDataFrame"] *, [data-testid="stDataEditor"] * {{
-            text-align: right !important;
-        }}
-
-        /* טבלאות פשוטות מסוג HTML */
-        [data-testid="stTable"] table, [data-testid="stTable"] th, [data-testid="stTable"] td {{
-            direction: rtl !important;
-            text-align: right !important;
-        }}
-        /* ============================================================== */
-
-        /* שדות קלט */
-        .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea {{ 
+        .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea, select {{ 
             background-color: {theme['input']} !important; 
             color: {theme['text']} !important; 
             border: 1px solid {theme['border']} !important; 
@@ -161,14 +135,8 @@ def setup_page_styling():
             text-align: right; 
         }}
 
-        /* כרטיסיות Expanders */
         .stExpander {{ background-color: {theme['card']}; border: 1px solid {theme['border']}; border-radius: 10px; }}
 
-        /* התאמה ללוח השנה (Calendar) */
-        .fc {{ direction: ltr !important; }} /* לוח שנה טכנית חייב LTR אבל התוכן RTL */
-        .fc-toolbar-title {{ color: {theme['text']} !important; }}
-
-        /* הזרקת עיצוב הלילה של לוח השנה */
         {calendar_css}
     </style>
     """, unsafe_allow_html=True)
@@ -610,7 +578,6 @@ def calculate_conversion_rate(conn):
 
 
 def get_smart_age_insights(birth_date_str=None):
-    """תיקון שגיאת ה-TypeError: מקבל ארגומנט כברירת מחדל"""
     if not birth_date_str: return None, []
     try:
         birth = datetime.strptime(str(birth_date_str), '%Y-%m-%d').date()
@@ -656,7 +623,6 @@ def get_dynamic_stock_data(tickers_dict):
         except:
             continue
     return pd.DataFrame(data)
-
 
 def calculate_smart_commission():
     return None
