@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # הגדרות ביטחון - שים לב לעדכן את ה-ID שלך!
 TOKEN = "xxxxxxx"
-ADMIN_IDS = [xxxxxx]  # שון, תחליף ל-ID האמיתי שלך
+ADMIN_IDS = ["xxxxxx"]  # שון, תחליף ל-ID האמיתי שלך
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

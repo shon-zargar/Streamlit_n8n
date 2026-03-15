@@ -144,7 +144,7 @@ with tabs[2]:
         st.warning("אין תביעות פעילות לעדכון.")
     else:
         with st.container(border=True):
-            claim_dict = dict(zip(claims_df['id'], claims_df['name']))
+            claim_dict = dict(zip(claims_df['id'], claims_df['lead_name']))
             claim_target_id = st.selectbox("בחר תיק תביעה לעדכון:", list(claim_dict.keys()),
                                            format_func=lambda x: f"{claim_dict[x]} (ID: {x})")
 

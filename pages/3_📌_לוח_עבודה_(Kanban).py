@@ -201,8 +201,10 @@ else:
 
                         if not voice_mode:
                             with st.form(key=f"note_form_{row['id']}"):
-                                new_note = st.text_area("הוסף סיכום שיחה ידני:")
-                                sent = st.selectbox("סנטימנט", ["ניטרלי", "חיובי", "שלילי"])
+                                # הוספת keys ייחודיים למניעת קריסת עמודות
+                                new_note = st.text_area("הוסף סיכום שיחה ידני:", key=f"note_text_{row['id']}")
+                                sent = st.selectbox("סנטימנט", ["ניטרלי", "חיובי", "שלילי"],
+                                                    key=f"sentiment_{row['id']}")
                                 if st.form_submit_button("💾 שמור תיעוד"):
                                     if new_note:
                                         try:
@@ -259,11 +261,14 @@ else:
                             pass
 
                         with st.form(key=f"t_form_{row['id']}"):
-                            t_title = st.text_input("הגדר משימה חדשה:")
-                            t_due = st.date_input("תאריך יעד", value=date.today())
+                            # הוספת keys ייחודיים למניעת קריסת עמודות ב-Streamlit
+                            t_title = st.text_input("הגדר משימה חדשה:", key=f"task_title_{row['id']}")
+                            t_due = st.date_input("תאריך יעד", value=date.today(), key=f"task_due_{row['id']}")
+
                             if st.form_submit_button("➕ הוסף משימה"):
                                 if t_title:
-                                    add_task(conn, row['id'], t_title, "בינוני", t_due.strftime('%Y-%m-%d'), t_title)
+                                    # תיקון סדר הפרמטרים לשמירת המשימה בצורה תקינה
+                                    add_task(conn, row['id'], t_title, "", t_due.strftime('%Y-%m-%d'), "בינוני")
                                     st.success("המשימה נוספה!")
                                     time.sleep(0.5)
                                     st.rerun()
